@@ -1,77 +1,46 @@
 ---
 name: preflight
-description: Verification prealable centralisee pour tous les skills aitestlist-plugin. Valide le token API, detecte la langue utilisateur, et resout l'URL du serveur. Prechage dans les agents via le champ skills.
+description: Verification prealable centralisee pour les agents du greffon aitest. Verifie la connexion au serveur MCP d'AI TestList (get_account), le forfait et la langue de l'utilisateur. Precharge dans les agents via le champ skills.
 user-invocable: false
 ---
 
 # Preflight
 
-Verification prealable centralisee. Tous les skills du plugin appellent ce skill
-en premiere etape pour eviter la duplication du code d'authentification.
+Verification prealable centralisee. Les agents du greffon l'executent en premiere etape.
 
-## Ce que ce skill fait
+## Connexion : rien a configurer
 
-1. Resoudre l'URL du serveur AITestList
-2. Verifier que le token API est defini
-3. Valider le token contre le serveur
-4. Detecter la langue de l'utilisateur
+Le greffon branche Claude Code sur le serveur MCP d'AI TestList (`https://aitestlist.com/mcp`).
+Les outils s'appellent `mcp__plugin_aitest_aitestlist__<outil>` (ex. `mcp__plugin_aitest_aitestlist__get_account`).
 
-## Etape 1: Resoudre l'URL du serveur
+- **Aucune cle a copier.** L'utilisateur se connecte une fois avec son compte AI TestList :
+  dans Claude Code, `/mcp`, choisir `aitestlist`, puis « Authenticate ». Le site ouvre une page « Autoriser ».
+- N'appelle **jamais** l'API d'AI TestList toi-meme (curl, Python, fetch) : elle refuse tout appel
+  qui ne vient pas du serveur MCP. Passe toujours par les outils.
 
-```bash
-echo ${AITESTLIST_URL:-http://localhost:8001}
-```
+## Etape unique : get_account
 
-Variable interne: `URL` = valeur retournee
+Appeler `get_account` (aucun parametre). Il retourne `user`, `email`, `plan_code`,
+`ai_integration_enabled`, `exec_test_enabled` et `language` (`fr` ou `en`).
 
-**Priorite:**
-1. Variable d'environnement `$AITESTLIST_URL` si definie
-2. Sinon: `http://localhost:8001` par defaut
-
-## Etape 2: Verifier le token
-
-```bash
-echo $AITESTLIST_TOKEN
-```
-
-Si vide ou non defini:
-- Informer: "Token API non defini. Configurez-le avec: `export AITESTLIST_TOKEN=<votre_token>`"
-- Indiquer: "Vous pouvez generer un token dans AITestList > Settings > Integration"
-- **STOP** - ne pas continuer
-
-## Etape 3: Valider le token contre le serveur
-
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" "${URL}/api/status"
-```
-
-**Reponses possibles:**
-- `{"status": "ok", ...}` → Token valide, continuer
-- `401` ou `{"error": "..."}` → Token invalide: "Token refuse par le serveur. Verifiez-le dans Settings > Integration."
-- Timeout / connection refused → "Serveur AITestList non accessible a ${URL}. Verifiez qu'il est demarre."
-
-Si erreur: **STOP** - ne pas continuer.
-
-## Etape 4: Detecter la langue
-
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" "${URL}/api/language"
-```
-
-Variable interne: `USER_LANG` = valeur retournee (`fr` ou `en`, defaut `fr` si erreur)
+**Cas d'erreur — STOP, ne pas contourner :**
+- Outil absent, « Not connected », erreur 401 ou acces refuse →
+  « Connexion a AI TestList requise : tapez `/mcp`, choisissez `aitestlist`, puis Authenticate. »
+  La page « Autoriser » exige un forfait payant ; si elle refuse, l'utilisateur doit changer de forfait sur aitestlist.com.
+- `ai_integration_enabled` faux → « Votre forfait AI TestList n'inclut pas l'integration IA. »
+- Pour l'execution seulement : `exec_test_enabled` faux → « Votre forfait n'inclut pas l'execution des tests. »
 
 ## Resultat
 
-Apres execution, les variables suivantes sont disponibles pour le skill appelant:
+| Variable | Exemple | Source |
+|----------|---------|--------|
+| `USER_LANG` | `fr` | `language` de `get_account` (defaut `fr`) |
+| `PLAN` | `pro` | `plan_code` de `get_account` |
 
-| Variable | Exemple | Description |
-|----------|---------|-------------|
-| `URL` | `http://localhost:8001` | URL du serveur AITestList |
-| `AITESTLIST_TOKEN` | `at_xxxx...` | Token API valide |
-| `USER_LANG` | `fr` | Langue de l'utilisateur |
+Tout ce que l'agent ecrit pour AI TestList (tests, commentaires, rapports) est dans `USER_LANG`,
+quelle que soit la langue de la conversation.
 
 ## Usage
 
-Ce skill est prechage dans les agents via le champ `skills:` dans leur frontmatter.
-Les agents ont les instructions preflight dans leur contexte au demarrage.
-Ils n'ont pas besoin de "l'appeler" — ils executent les etapes directement.
+Ce skill est precharge dans les agents via le champ `skills:` de leur frontmatter.
+Les agents n'ont pas besoin de « l'appeler » : ils executent l'etape directement.

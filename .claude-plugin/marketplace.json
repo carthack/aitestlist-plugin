@@ -1,17 +1,19 @@
 {
   "name": "aitestlist-plugin",
   "owner": {
-    "name": "9524-2426 Quebec Inc.",
+    "name": "Solutions Codexalia Inc.",
     "url": "https://aitestlist.com"
   },
   "metadata": {
-    "description": "AI TestList testing ecosystem for Claude Code",
+    "description": "AI TestList : créer, exécuter et rapporter des tests avec votre assistant IA.",
+    "version": "2.0.0",
     "repository": "https://github.com/carthack/aitestlist-plugin"
   },
   "plugins": [
     {
       "name": "aitest",
-      "description": "Create, execute , and report QA tests via Claude Code with AI TestList",
+      "version": "2.0.0",
+      "description": "AI TestList : créer, exécuter et rapporter des tests avec votre assistant IA.",
       "source": {
         "source": "github",
         "repo": "carthack/aitestlist-plugin"

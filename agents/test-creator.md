@@ -7,6 +7,12 @@ tools:
   - Glob
   - Grep
   - Bash
+  - mcp__plugin_aitest_aitestlist__get_account
+  - mcp__plugin_aitest_aitestlist__list_projects
+  - mcp__plugin_aitest_aitestlist__list_categories
+  - mcp__plugin_aitest_aitestlist__submit_test
+  - mcp__plugin_aitest_aitestlist__pending_tests
+  - mcp__plugin_aitest_aitestlist__test_writing_guide
 model: opus
 max_turns: 25
 skills:
@@ -38,11 +44,9 @@ Ils donnent un effet professionnel et montrent la progression au client.
 ### Etape 1 — Preflight:
 ```
 🔌 Connecting to AI TestList...
-   → URL: http://localhost:8001
-🔑 Verifying API token...
-✅ Connected — Token valid
-🌐 Detecting language...
-   → Language: FR
+✅ Connected — Stephane (plan: pro)
+🌐 Language: FR
+📖 Loading test writing guide...
 ```
 Adapter les valeurs reelles.
 
@@ -80,32 +84,32 @@ Lister CHAQUE tache generee avec son numero. Adapter les titres reels.
 
 ### Etape 4 — Soumission:
 ```
-📤 Submitting 8 tasks to AITestList...
-   → POST /api/tests/submit
-   → Response: 201 Created
+📤 Submitting 8 tasks to AI TestList...
 ✅ Test "Test page de connexion" queued for import!
-   → 8 tasks created
+   → 8 tasks
    → Categories: Techniques > Securite > Authentification, Comportementales > Fonctionnalite > Workflow
-   → Import queue: ${URL}/import-queue
+   → Import queue: https://aitestlist.com/import
    → Approve the import to create the test
 ```
 
 ## Role
 
 Tu:
-1. Executes le preflight (URL, token, langue) — les instructions sont dans ton contexte
+1. Executes le preflight (connexion, forfait, langue) — les instructions sont dans ton contexte
 2. Analyses le projet pour comprendre son architecture
-3. Generes et soumets les tests via l'API — les instructions create-test sont dans ton contexte
+3. Generes et soumets les tests avec les outils MCP d'AI TestList — les instructions create-test sont dans ton contexte
+
+Les outils d'AI TestList s'appellent `mcp__plugin_aitest_aitestlist__<outil>`. N'appelle jamais
+l'API toi-meme (curl, Python). Connexion refusee → « tapez `/mcp`, choisissez `aitestlist`,
+puis Authenticate » (forfait payant requis), puis STOP.
 
 ## Workflow
 
 ### Etape 1: Preflight
 
 Executer les instructions du skill preflight (deja dans ton contexte):
-1. Resoudre URL via `$AITESTLIST_URL` ou defaut
-2. Verifier `$AITESTLIST_TOKEN`
-3. Valider via `GET ${URL}/api/status`
-4. Detecter langue via `GET ${URL}/api/language`
+1. `get_account` → connexion, forfait, `USER_LANG`
+2. `test_writing_guide` → regles d'ecriture des tests (a suivre exactement)
 
 ### Etape 2: Analyser le projet
 
@@ -139,17 +143,17 @@ Scanner le projet courant pour determiner:
 ### Etape 3: Generer et soumettre les tests
 
 Suivre les instructions create-test (dans ton contexte):
-1. `GET ${URL}/api/categories?lang=${USER_LANG}`
-2. Generer les taches de test dans `USER_LANG`
+1. `list_categories(lang=USER_LANG)` (et `list_projects` si un projet est nomme)
+2. Generer les taches de test dans `USER_LANG`, selon `test_writing_guide`
 3. Si paiement detecte: suivre aussi les instructions create-payment (dans ton contexte)
-4. `POST ${URL}/api/tests/submit`
+4. `submit_test(name, tasks, project_id)` — un appel par test
 
 ### Etape 4: Confirmer
 
 Informer l'utilisateur:
 - Nombre de taches creees
 - Categories utilisees
-- Le test est dans la queue d'import: `${URL}/import-queue`
+- Le test attend son approbation dans la file d'import: https://aitestlist.com/import
 
 ## Notes
 

@@ -1,6 +1,6 @@
 ---
 name: create-test
-description: Cree et soumet des tests a AI TestList via l'API REST. Genere des taches de test intelligentes avec categories appropriees. Skill core du plugin aitestlist-plugin.
+description: Cree et soumet des tests a AI TestList avec les outils MCP (list_categories, list_projects, submit_test). Genere des taches de test intelligentes avec les bonnes categories. Skill core du greffon aitest.
 user-invocable: false
 ---
 
@@ -8,11 +8,22 @@ user-invocable: false
 
 Skill core pour creer et soumettre des tests a AI TestList.
 
+Les outils s'appellent `mcp__plugin_aitest_aitestlist__<outil>`. N'appelle jamais l'API toi-meme
+(curl, Python) : elle refuse tout appel qui ne vient pas du serveur MCP.
+
+## Regle d'or : le guide du serveur fait foi
+
+**Avant d'ecrire le moindre test, appeler `test_writing_guide`** et le suivre exactement :
+format de `submit_test`, structure des descriptions (Preconditions / Etapes / Attendu),
+types de taches (`[SETUP]`, `[TEST]`, `[VERIFY]`, `[TEARDOWN]`), ordre des taches,
+`[TEARDOWN]` obligatoire, donnees de test, marqueur `[CREATE_TEST_EMAIL:{context}]`,
+tests de paiement (`[PAYMENT_TEST]`), regles de qualite et exemples.
+Ne pas s'en remettre a une version memorisee : le guide peut changer.
+
 ## IMPORTANT: Status Output (Live Progress)
 
 **Tu DOIS afficher des messages de status a chaque etape.**
 Ces messages sont visibles en temps reel dans le terminal Claude Code.
-Ils donnent un effet professionnel et montrent la progression au client.
 
 **Format obligatoire — afficher en texte brut (PAS dans un bloc de code):**
 
@@ -44,228 +55,39 @@ Ils donnent un effet professionnel et montrent la progression au client.
 
 **Soumission:**
 ```
-📤 Submitting 8 tasks to AITestList...
-   → POST /api/tests/submit
-   → Response: 201 Created
+📤 Submitting 8 tasks to AI TestList...
 ✅ Test "Test page de connexion" queued for import!
-   → 8 tasks created
+   → 8 tasks
    → Categories: Techniques > Securite > Authentification, Comportementales > Fonctionnalite > Workflow
-   → Import queue: ${URL}/import-queue
+   → Import queue: https://aitestlist.com/import
    → Approve the import to create the test
-```
-
-## Variables disponibles
-
-Ce skill est prechage dans l'agent test-creator via le champ `skills:`.
-Les variables suivantes sont disponibles via preflight (egalement prechage):
-- `URL` — URL du serveur AITestList
-- `AITESTLIST_TOKEN` — Token API valide
-- `USER_LANG` — Langue de l'utilisateur (fr/en)
-
-## API REST
-
-### Obtenir les categories
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  "${URL}/api/categories?lang=${USER_LANG}"
-```
-
-### Obtenir les projets
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  "${URL}/api/projects"
-```
-
-### Soumettre un test
-```bash
-curl -s -X POST "${URL}/api/tests/submit" \
-  -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Nom du test",
-    "tasks": [
-      {"title": "Tache 1", "category": "Categorie", "description": "Description"},
-      {"title": "Tache 2", "category": "Categorie", "description": "Description"}
-    ],
-    "project_id": 123
-  }'
 ```
 
 ## Workflow
 
-1. **Obtenir les categories** - `GET ${URL}/api/categories?lang=${USER_LANG}`
-2. **Analyser le contexte** - Comprendre ce qui doit etre teste (scanner le projet)
-3. **Detecter les specialites** - Si paiement detecte, suivre aussi les instructions create-payment (prechargees dans l'agent)
-4. **Generer les taches** - Creer des taches **DANS LA LANGUE DE L'UTILISATEUR** (`USER_LANG`), PAS la langue de la conversation
-5. **Soumettre** - `POST ${URL}/api/tests/submit`
-6. **Confirmer** - Informer que le test est dans la queue d'import
+`USER_LANG` vient du preflight (`get_account`).
 
-**IMPORTANT:** Toujours generer dans la langue configuree dans AITestList (`USER_LANG` du preflight), independamment de la langue de la conversation:
-- **Nom du test** - dans la langue de l'utilisateur
-- **Titres des taches** - dans la langue de l'utilisateur
-- **Descriptions des taches** - dans la langue de l'utilisateur
-- **Categories** - utiliser les categories de l'etape 2 (deja dans la bonne langue)
+1. **Guide** — `test_writing_guide`
+2. **Categories** — `list_categories(lang=USER_LANG)` ; utiliser uniquement ces chemins (« A > B > C »)
+3. **Projet** — `list_projects` si l'utilisateur a nomme un projet ; `project_id` seulement pour un projet
+   dont il est proprietaire, sinon l'omettre (il choisira a l'approbation)
+4. **Analyser** — scanner le code du projet courant avec Read, Glob, Grep (toujours a neuf, pas de cache)
+5. **Specialites** — paiement detecte (Stripe, PayPal) : suivre aussi les instructions create-payment
+6. **Generer** — les taches **dans `USER_LANG`**, pas dans la langue de la conversation
+7. **Soumettre** — `submit_test(name, tasks, project_id)` : un appel par test (un test par page ou fonctionnalite)
+8. **Confirmer** — voir « Apres soumission »
 
-## Format des taches
+## Erreurs
 
-```json
-{
-  "title": "[TYPE] Action a verifier",
-  "category": "Principale > Sous-categorie > Detail",
-  "description": "Preconditions: ...\nSteps:\n1. ...\n2. ...\nExpected: ..."
-}
-```
-
-**Types de taches:**
-- `[SETUP]` - Preparation (creer user, data, etc.)
-- `[TEST]` - Test principal (optionnel, implicite)
-- `[VERIFY]` - Verification/assertion
-- `[TEARDOWN]` - Nettoyage
-
-## Categories
-
-**NE PAS utiliser de categories hardcodees.** Toujours les recuperer de l'API avec la langue de l'utilisateur:
-
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  "${URL}/api/categories?lang=${USER_LANG}"
-```
-
-L'API retourne les categories dans la bonne langue:
-- **Anglais (lang=en)**: `Technical > Security > Authentication`
-- **Francais (lang=fr)**: `Techniques > Securite > Authentification`
-
-Utiliser les chemins de categories exacts retournes par l'API.
-
-## Donnees de test
-
-| Type | Pattern | Exemple |
-|------|---------|---------|
-| Email | [CREATE_TEST_EMAIL:{context}] | [CREATE_TEST_EMAIL:inscription] |
-| Password | Test{Context}123! | TestLogin123! |
-| Username | testuser_{context}_{num} | testuser_login_001 |
-| Phone | +1555000{4 digits} | +15550001234 |
-
-### Emails de test - REGLE CRITIQUE
-
-**Ne JAMAIS assumer qu'un compte utilisateur existe deja sur l'application du client.**
-L'agent de test ne connait PAS l'application du client. Il n'y a PAS de compte pre-existant.
-
-**Pour CHAQUE test qui necessite un compte connecte:**
-1. La premiere tache doit etre un [SETUP] qui cree le compte via inscription
-2. Utiliser `[CREATE_TEST_EMAIL:{context}]` pour generer un vrai email via Zoho
-3. S'inscrire sur l'app du client avec cet email
-4. Puis se connecter avec cet email pour les taches suivantes
-
-**Le contexte sert a identifier le meme email a travers plusieurs taches:**
-- Tache 1: `[CREATE_TEST_EMAIL:login_test]` -> s'inscrit avec cet email
-- Tache 3: `[CREATE_TEST_EMAIL:login_test]` -> meme email, l'agent sait le reutiliser
-
-**INTERDIT:**
-- Ne JAMAIS utiliser d'adresses hardcodees (claude@test.com, admin@example.com, etc.)
-- Ne JAMAIS inventer d'adresses (@testmail.com, @example.com, etc.)
-- Ne JAMAIS ecrire "Connecte avec X" en precondition sans un [SETUP] qui cree ce compte d'abord
-
-## Ordre des taches - CRITIQUE
-
-Les taches DOIVENT etre en ordre logique d'execution. L'agent exec-test les execute
-sequentiellement, de la premiere a la derniere. Une tache peut dependre du resultat
-d'une tache precedente.
-
-1. **[SETUP]** - Creer les prerequis (compte, donnees, etc.)
-2. **Happy path** - Le flow normal fonctionne (connexion, navigation de base)
-3. **Fonctionnalites** - Tester les fonctionnalites principales
-4. **Validation** - Les entrees invalides sont rejetees
-5. **Edge cases** - Conditions limites
-6. **Erreurs** - Le systeme gere les echecs
-7. **Securite** - Injections, XSS, permissions
-8. **[TEARDOWN]** - Nettoyage de tout ce qui a ete cree
-
-**IMPORTANT:** Ne jamais mettre une tache qui necessite d'etre connecte AVANT
-le [SETUP] qui cree et connecte le compte.
-
-## Regle TEARDOWN - OBLIGATOIRE
-
-**Chaque test DOIT se terminer par UNE tache [TEARDOWN] finale** qui verifie et nettoie
-tout ce qui a ete cree pendant le test (comptes, projets, donnees, etc.).
-
-## Delegation aux skills specialises
-
-Lors de l'analyse du projet (etape 4), si des systemes specialises sont detectes,
-suivre les instructions specialisees (prechargees dans l'agent via `skills:`):
-
-| Detection | Instructions |
-|-----------|-------------|
-| Stripe / PayPal detecte | create-payment (prechage dans l'agent) |
-| (futur) Auth complexe | create-security |
-| (futur) UI riche | create-accessibility |
-
-## Exemples complets
-
-### Exemple anglais (lang=en)
-
-```json
-{
-  "name": "Login page test",
-  "tasks": [
-    {
-      "title": "[SETUP] Register a test account",
-      "category": "Behavioral > Functionality > Workflow",
-      "description": "Preconditions: None\nSteps:\n1. Go to the app registration page\n2. Use email: [CREATE_TEST_EMAIL:login_test]\n3. Fill name: Test User\n4. Fill password: TestLogin123!\n5. Confirm password: TestLogin123!\n6. Submit the form\nExpected: Account created successfully"
-    },
-    {
-      "title": "Login with valid credentials",
-      "category": "Technical > Security > Authentication",
-      "description": "Preconditions: Account [CREATE_TEST_EMAIL:login_test] created in SETUP\nSteps:\n1. Go to the app login page\n2. Enter email: [CREATE_TEST_EMAIL:login_test]\n3. Enter password: TestLogin123!\n4. Click Login\nExpected: Redirect to dashboard, user name visible"
-    },
-    {
-      "title": "Login with wrong password",
-      "category": "Technical > Security > Authentication",
-      "description": "Preconditions: None\nSteps:\n1. Go to the app login page\n2. Enter email: [CREATE_TEST_EMAIL:login_test]\n3. Enter password: WrongPassword999!\n4. Click Login\nExpected: Generic error message, stay on login page"
-    },
-    {
-      "title": "[TEARDOWN] Clean up all test data",
-      "category": "Behavioral > Functionality > Workflow",
-      "description": "Preconditions: Logged in\nSteps:\n1. Delete any accounts created during this test\n2. Delete any projects or data created during this test\n3. Verify nothing test-related remains in the application\nExpected: All test artifacts removed, application in clean state"
-    }
-  ]
-}
-```
-
-### Exemple francais (lang=fr)
-
-```json
-{
-  "name": "Test page de connexion",
-  "tasks": [
-    {
-      "title": "[SETUP] Inscrire un compte de test",
-      "category": "Comportementales > Fonctionnalite > Workflow",
-      "description": "Preconditions: Aucune\nEtapes:\n1. Aller sur la page d'inscription de l'app\n2. Utiliser email: [CREATE_TEST_EMAIL:login_test]\n3. Remplir nom: Utilisateur Test\n4. Remplir mot de passe: TestLogin123!\n5. Confirmer mot de passe: TestLogin123!\n6. Soumettre le formulaire\nAttendu: Compte cree avec succes"
-    },
-    {
-      "title": "Connexion avec identifiants valides",
-      "category": "Techniques > Securite > Authentification",
-      "description": "Preconditions: Compte [CREATE_TEST_EMAIL:login_test] cree au SETUP\nEtapes:\n1. Aller sur la page de connexion de l'app\n2. Entrer email: [CREATE_TEST_EMAIL:login_test]\n3. Entrer mot de passe: TestLogin123!\n4. Cliquer Connexion\nAttendu: Redirection vers tableau de bord, nom visible"
-    },
-    {
-      "title": "Connexion avec mauvais mot de passe",
-      "category": "Techniques > Securite > Authentification",
-      "description": "Preconditions: Aucune\nEtapes:\n1. Aller sur la page de connexion de l'app\n2. Entrer email: [CREATE_TEST_EMAIL:login_test]\n3. Entrer mot de passe: MauvaisPass999!\n4. Cliquer Connexion\nAttendu: Message d'erreur generique, reste sur la page de connexion"
-    },
-    {
-      "title": "[TEARDOWN] Nettoyer toutes les donnees de test",
-      "category": "Comportementales > Fonctionnalite > Workflow",
-      "description": "Preconditions: Connecte\nEtapes:\n1. Supprimer les comptes crees pendant ce test\n2. Supprimer les projets ou donnees crees pendant ce test\n3. Verifier qu'il ne reste rien lie aux tests dans l'application\nAttendu: Tous les artefacts de test supprimes, application propre"
-    }
-  ]
-}
-```
+- `Project not found or access denied` : retirer `project_id` et soumettre de nouveau.
+- `LIMIT_REACHED` : limite du forfait atteinte ; le dire a l'utilisateur, ne pas reessayer.
+- « Not connected », 401 ou acces refuse : dire a l'utilisateur
+  « tapez `/mcp`, choisissez `aitestlist`, puis Authenticate » (forfait payant requis), puis STOP.
 
 ## Apres soumission
 
-Informer l'utilisateur:
+Informer l'utilisateur :
 1. Nombre de taches creees
 2. Categories utilisees
-3. Le test est dans la queue d'import: **${URL}/import-queue**
-4. L'utilisateur doit approuver l'import pour creer le test
+3. Le test attend son approbation dans la file d'import : **https://aitestlist.com/import**
+   (`pending_tests` liste ce qui attend encore)

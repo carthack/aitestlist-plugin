@@ -1,6 +1,6 @@
 ---
 name: exec-db-elevation
-description: Eleve les permissions d'un utilisateur de test dans la base de donnees du projet quand une tache echoue a cause d'une restriction de plan/role. Restaure l'etat original apres le re-test.
+description: Eleve temporairement les permissions d'un utilisateur de test dans la base de donnees du projet quand une tache echoue a cause d'une restriction de plan/role. Restaure l'etat original apres le re-test.
 user-invocable: false
 ---
 
@@ -10,10 +10,15 @@ Skill specialise pour l'elevation temporaire de permissions en base de donnees.
 Appele par le skill core `exec-test` quand une tache echoue a cause d'une restriction
 de plan ou de role (redirect vers /pricing, "upgrade your plan", "access denied", etc.).
 
+Les regles sont dans `test_execution_guide` (section « Temporary permission elevation in the
+database ») : les suivre. Ce skill garde ce qui est propre a Claude Code : les requetes passent par
+l'outil Bash sur l'ordinateur de l'utilisateur.
+
 ## Prerequis
 
-La reponse de download de la queue doit contenir `database_config` (non null).
-Si `database_config` est null, ce skill ne peut pas etre utilise — retourner echec.
+`database_config` (retourne par `mcp__plugin_aitest_aitestlist__get_execution_queue`) doit etre non null :
+`db_type`, `host`, `port`, `username`, `password`, `database`. Ne jamais afficher le mot de passe.
+Si `database_config` est null, ce skill ne peut pas etre utilise — reporter la tache normalement (echec).
 
 ## Workflow
 
@@ -66,7 +71,8 @@ conn.close()
 
 ### 6. Reporter
 
-Status "succes", comment "Permission elevated: changed role from 'free' to 'admin'"
+Reporter le resultat du re-test avec `report_result` ; commentaire (dans `USER_LANG`), ex. :
+"Permission elevated: changed role from 'free' to 'admin' (restored)"
 
 ## Multi-driver BD
 
@@ -88,3 +94,6 @@ Si le driver n'est pas installe, l'installer: `pip install psycopg2-binary`
 - Toujours restaurer l'etat APRES le re-test
 - Ne modifier que le user de test, jamais d'autres comptes
 - Logger chaque modification dans le commentaire de la tache
+
+En cas de refus d'acces a AI TestList (« Not connected », 401) : dire a l'utilisateur
+« tapez `/mcp`, choisissez `aitestlist`, puis Authenticate » (forfait payant requis), puis STOP.

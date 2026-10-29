@@ -1,91 +1,46 @@
 ---
 name: exec-payment
-description: Execute les taches de test payment (Stripe Elements, Stripe Checkout, PayPal sandbox). Verifie le toggle payment testing avant execution. Appele par exec-test quand une tache contient [PAYMENT_TEST].
+description: Execute les taches de test de paiement (Stripe Elements, Stripe Checkout, PayPal sandbox) dans le navigateur. Verifie payment_testing (get_exec_mode) avant execution. Utilise par exec-test quand une tache contient [PAYMENT_TEST].
 user-invocable: false
 ---
 
 # Execute Payment Tests
 
-Skill specialise pour l'execution de tests de paiement via Playwright.
-Appele par le skill core `exec-test` quand une tache contient `[PAYMENT_TEST]` dans sa description.
+Instructions pour les taches dont la description contient `[PAYMENT_TEST]`.
+Les regles (verification de `payment_testing`, refus des cles `live`, cartes de test) sont dans
+`test_execution_guide` (section « Payment tasks ») : les suivre. Ce skill ne garde que ce qui
+est propre a Claude Code : remplir les champs Stripe avec les outils du navigateur.
 
-## Verification AVANT execution
+## Verification avant execution
 
-L'API `/api/settings/exec-mode` retourne la config payment testing:
-```json
-{
-  "exec_mode": "...",
-  "payment_testing": {
-    "enabled": false,
-    "stripe_mode": "test",
-    "paypal_mode": "sandbox"
-  }
-}
-```
+`payment_testing` vient de `mcp__plugin_aitest_aitestlist__get_exec_mode` (deja lu au debut de l'execution).
+- `enabled` faux → `echec` ; `stripe_mode` ou `paypal_mode` = `live` → `erreur`. Messages exacts : voir le guide.
 
-**Regles:**
-- Si `payment_testing.enabled` est `false`: retourner status `echec` avec commentaire
-  "Payment testing disabled in Settings > Execution. Enable it to run this test."
-- Si `stripe_mode` est `live` ou `paypal_mode` est `live`: retourner status `erreur` avec
-  commentaire "SAFETY: Live payment keys detected. Cannot execute payment tests."
-- Si tout est OK (enabled + test/sandbox): executer normalement
+## Stripe Elements (iframes) avec Playwright
 
-## Cartes test Stripe
+Chaque champ de carte est souvent dans son propre iframe
+(`iframe[name*="__privateStripeFrame"]` ou `iframe[title*="Secure card"]`).
 
-| Carte | Usage |
-|-------|-------|
-| `4242 4242 4242 4242` | Paiement reussi (Visa) |
-| `4000 0000 0000 0002` | Carte declinee |
-| `4000 0025 0000 3155` | Requiert 3D Secure |
-| `4000 0000 0000 9995` | Fonds insuffisants |
-
-- Expiry: toute date future (ex: `12/30`)
-- CVC: tout nombre a 3 chiffres (ex: `123`)
-
-## Interagir avec Stripe Elements (iframe)
-
-Stripe Elements utilise des iframes pour les champs de carte. Pour remplir:
-
-1. Trouver l'iframe Stripe:
+1. `browser_snapshot` : reperer les iframes et les champs (`cardnumber`, `exp-date`, `cvc`).
+   Les champs des iframes apparaissent dans le snapshot avec leurs refs : `browser_type` sur ces refs.
+2. Si un champ n'est pas accessible par ref, utiliser `browser_run_code` / `browser_run_code_unsafe` :
+   ```javascript
+   const card = page.frameLocator('iframe[name*="__privateStripeFrame"]').first();
+   await card.locator('input[name="cardnumber"]').fill('4242 4242 4242 4242');
    ```
-   page.frameLocator('iframe[name*="__privateStripeFrame"]')
-   ```
-   ou `iframe[title*="Secure card"]`
+3. Revenir a la page principale pour cliquer sur le bouton de paiement.
 
-2. Dans l'iframe, remplir les champs:
-   - Numero: `input[name="cardnumber"]`
-   - Expiry: `input[name="exp-date"]`
-   - CVC: `input[name="cvc"]`
+Avec Claude dans Chrome : `find` pour reperer les champs, puis `form_input` ou `computer` (clic + saisie).
 
-3. Revenir au contexte principal pour cliquer sur le bouton Submit
+## Stripe Checkout et PayPal
 
-**Note:** Chaque champ Stripe peut etre dans son propre iframe.
-Utiliser `browser_snapshot()` pour identifier les iframes disponibles.
+- Stripe Checkout : la page passe sur `checkout.stripe.com` ; remplir les champs directement.
+- PayPal : fenetre ou redirection vers `sandbox.paypal.com` ; `browser_tabs` pour changer d'onglet ;
+  identifiants sandbox fournis dans la tache.
 
-## Stripe Checkout (page Stripe hebergee)
+## Jamais
 
-Si le client utilise Stripe Checkout (redirection vers checkout.stripe.com):
-1. La page redirige vers `checkout.stripe.com`
-2. Remplir directement les champs sur la page Stripe
-3. Le numero de carte test fonctionne en mode test
+- Une vraie carte, des cles `live`, un numero de carte dans un commentaire ou un journal.
 
-## PayPal sandbox
-
-Si le client utilise PayPal:
-1. Un popup ou redirect vers `sandbox.paypal.com` s'ouvre
-2. Utiliser les identifiants sandbox PayPal fournis dans la description de la tache
-3. Completer le flow d'approbation PayPal
-
-## SECURITE - NE JAMAIS
-
-- Utiliser de vraies cartes de credit
-- Executer des tests payment si les cles sont en mode live
-- Continuer si le toggle payment testing est desactive
-- Stocker des numeros de carte en clair dans les logs ou commentaires
-
-## Retour au skill exec-test
-
-Apres execution, retourner au core exec-test:
-- `status`: succes / echec / erreur
-- `comment`: description du resultat (dans USER_LANG)
-- `duration_ms`: temps d'execution
+En cas de refus d'acces a AI TestList (« Not connected », 401) : dire a l'utilisateur
+« tapez `/mcp`, choisissez `aitestlist`, puis Authenticate » (forfait payant requis), puis STOP.

@@ -5,6 +5,12 @@ tools:
   - Bash
   - Read
   - SendMessage
+  - mcp__plugin_aitest_aitestlist__get_account
+  - mcp__plugin_aitest_aitestlist__list_projects
+  - mcp__plugin_aitest_aitestlist__report_result
+  - mcp__plugin_aitest_aitestlist__queue_status
+  - mcp__plugin_aitest_aitestlist__failed_tasks
+  - mcp__plugin_aitest_aitestlist__create_error_report
 model: sonnet
 skills:
   - preflight
@@ -18,6 +24,10 @@ Agent de reporting pour les executions de tests AI TestList.
 Les skills preflight, report-live et error-report sont precharges dans ton contexte.
 Tu as toutes les instructions — ne jamais appeler de skills.
 
+Les outils d'AI TestList s'appellent `mcp__plugin_aitest_aitestlist__<outil>`. N'appelle jamais
+l'API toi-meme (curl, Python). Connexion refusee → « tapez `/mcp`, choisissez `aitestlist`,
+puis Authenticate » (forfait payant requis), puis STOP.
+
 ## Role
 
 Tu es le point central de reporting. Tu:
@@ -29,12 +39,12 @@ Tu es le point central de reporting. Tu:
 
 Quand l'utilisateur demande un rapport d'erreurs:
 
-1. Executer le preflight (instructions dans ton contexte): URL, token, langue
+1. Executer le preflight (instructions dans ton contexte): `get_account` → connexion, langue
 2. Suivre les instructions error-report (dans ton contexte):
-   - `GET ${URL}/api/projects` → choisir un projet
-   - `GET ${URL}/api/projects/{id}/failed-tasks`
-   - Analyser chaque echec (error, cause, solutions)
-   - `POST ${URL}/api/reports/error-analysis`
+   - `list_projects` → choisir un projet
+   - `failed_tasks(project_id)`
+   - Analyser tous les echecs en un seul passage (error, cause, solution, steps)
+   - `create_error_report(project_id, diagnoses, task_index)` — un seul appel
 3. Confirmer la disponibilite du rapport
 
 ## Mode teams: Phase 1 — Reporting live
@@ -53,12 +63,7 @@ queue_id: 42
 ### Pousser chaque resultat
 
 Pour chaque message recu, suivre les instructions report-live (dans ton contexte):
-```bash
-curl -s -X POST -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"task_id": ID, "status": "STATUS", "comment": "COMMENT"}' \
-  "${URL}/api/execution-queue/${QUEUE_ID}/result"
-```
+`report_result(queue_id, task_id, status, comment, duration_ms)`.
 
 ### Maintenir le compteur
 
@@ -90,7 +95,7 @@ Taches echouees:
   - [Login] Mot de passe faible: Message d'erreur attendu, page de succes affichee
   - [Inscription] Email duplique: Erreur 500 au lieu de message utilisateur
 
-Rapport d'erreurs PDF genere et envoye a AITestList.
+Rapport d'erreurs PDF genere sur AI TestList (page Rapports).
 ```
 
 ## Notes

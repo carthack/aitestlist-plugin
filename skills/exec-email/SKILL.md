@@ -1,79 +1,35 @@
 ---
 name: exec-email
-description: Gere les aliases email temporaires pour les tests (creation, attente, lecture, nettoyage). Utilise l'API AITestList comme proxy vers Zoho. Appele par exec-test quand une tache contient [CREATE_TEST_EMAIL].
+description: Gere les adresses de courriel de test (creation, attente, lecture, nettoyage) avec les outils MCP d'AI TestList. Utilise par exec-test quand une tache contient [CREATE_TEST_EMAIL:...].
 user-invocable: false
 ---
 
 # Execute Email Testing
 
-Skill specialise pour la gestion des emails de test via l'API AITestList.
-Appele par le skill core `exec-test` quand une tache contient `[CREATE_TEST_EMAIL:...]`.
+Instructions pour les taches qui contiennent `[CREATE_TEST_EMAIL:{context}]`.
+La marche a suivre complete est dans `test_execution_guide` (section « Test email markers ») :
+la suivre. Ce skill ne garde que l'aide-memoire des outils.
 
-**Ne jamais acceder a Zoho directement.** Toujours passer par l'API AITestList.
+**Ne jamais utiliser une autre boite courriel ni inventer une adresse.** Tout passe par les outils
+`mcp__plugin_aitest_aitestlist__*` (jamais d'appel direct a l'API ni au fournisseur de courriel).
 
-## Convention de nommage des aliases
+## Outils
 
-`claude.{role}_queue{id}@aitestlist.com`
+| Pour | Outil et parametres |
+|------|---------------------|
+| Creer l'adresse (1re apparition du contexte) | `create_test_email(prefix="{context}_queue{queue_id}")` → `alias` |
+| Attendre un courriel | `wait_for_email(alias, subject_contains="...", timeout=30)` (60 s maximum) → `found`, `email` |
+| Lister les courriels recus | `list_emails(alias, limit=10, after=...)` |
+| Lire un courriel (et ses liens) | `read_email(message_id)` → `subject`, `html`, `text`, `links` |
+| Nettoyer (OBLIGATOIRE) | `delete_test_email(alias)` |
 
-Exemples:
-- `claude.user1_queue4@aitestlist.com`
-- `claude.billing_queue12@aitestlist.com`
+## Contexte → adresse
 
-## 1. Creer un alias email
+1. Premiere fois qu'un contexte apparait : `create_test_email`, puis retenir `context → alias`.
+2. Meme contexte plus loin dans la file : reutiliser la MEME adresse.
+3. `found: false` apres `wait_for_email` → la tache est en `echec`.
+4. Ouvrir le lien de confirmation ou de reinitialisation (`links` de `read_email`) dans le navigateur.
+5. `delete_test_email` pour chaque adresse creee, au `[TEARDOWN]` ou a la fin, meme apres des echecs.
 
-```bash
-curl -s -X POST -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"prefix": "user1_queue4"}' \
-  "${URL}/api/email-testing/aliases"
-```
-Reponse: `{"success": true, "alias": "claude.user1_queue4@aitestlist.com"}`
-
-Utiliser l'adresse retournee dans les formulaires d'inscription/invitation.
-
-## 2. Attendre la reception d'un courriel
-
-```bash
-curl -s -X POST -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"subject_contains": "Verify", "timeout": 30}' \
-  "${URL}/api/email-testing/aliases/claude.user1_queue4@aitestlist.com/wait"
-```
-Reponse: `{"found": true, "email": {"id": "...", "subject": "...", "from": "...", "date": "..."}}`
-
-Si `found: false`, le courriel n'est pas arrive dans le delai. Reporter comme echec.
-
-## 3. Lire le contenu et extraire les liens
-
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  "${URL}/api/email-testing/emails/{message_id}"
-```
-Reponse: `{"subject": "...", "html": "...", "text": "...", "links": ["https://..."]}`
-
-Les liens sont extraits automatiquement du body HTML.
-Utiliser Playwright pour naviguer vers le lien de validation/reset.
-
-## 4. Nettoyer les aliases (OBLIGATOIRE)
-
-```bash
-curl -s -X DELETE -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-  "${URL}/api/email-testing/aliases/claude.user1_queue4@aitestlist.com"
-```
-
-**IMPORTANT:** Toujours nettoyer les aliases apres les tests, meme en cas d'echec.
-Le nettoyage doit etre fait dans le [TEARDOWN] ou a la fin de l'execution.
-
-## Mapping [CREATE_TEST_EMAIL:context] → alias
-
-Quand le skill recoit un contexte (ex: `login_test`), il:
-1. Cree l'alias avec prefix = `{context}_queue{queue_id}`
-2. Stocke le mapping `context → alias` pour reutilisation
-3. Les taches suivantes qui referent au meme contexte reutilisent le meme alias
-
-## Retour au skill exec-test
-
-Apres chaque operation, retourner:
-- L'adresse email creee (pour la tache SETUP)
-- Le contenu de l'email recu (pour les taches de verification)
-- Les liens extraits (pour la navigation Playwright)
+En cas de refus d'acces a AI TestList (« Not connected », 401) : dire a l'utilisateur
+« tapez `/mcp`, choisissez `aitestlist`, puis Authenticate » (forfait payant requis), puis STOP.

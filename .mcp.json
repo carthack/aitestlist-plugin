@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aitestlist": {
+      "type": "http",
+      "url": "https://aitestlist.com/mcp"
+    }
+  }
+}
