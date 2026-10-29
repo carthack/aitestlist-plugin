@@ -1,12 +1,12 @@
 ---
 name: exec-test
-description: Telecharge une file d'execution approuvee depuis AITestList et execute les tests localement via MCP Playwright dans Claude Code. Skill core du plugin aitestlist-plugin.
+description: Telecharge une file d'execution approuvee d'AI TestList (outils MCP) et execute les tests dans un navigateur (Playwright ou Claude dans Chrome) depuis Claude Code. Skill core du greffon aitest.
 user-invocable: false
 ---
 
 # Execute Tests
 
-Skill core pour executer les tests AI TestList via MCP Playwright.
+Skill core pour executer les tests AI TestList dans un navigateur, depuis Claude Code.
 
 ## IMPORTANT: Status Output (Live Progress)
 
@@ -16,9 +16,9 @@ Ils donnent un effet professionnel et montrent la progression au client.
 
 **Format obligatoire — afficher en texte brut (PAS dans un bloc de code).**
 
-**Verification MCP Playwright:**
+**Verification du navigateur:**
 ```
-🎭 Checking MCP Playwright...
+🎭 Checking browser...
 ✅ Playwright ready
 ```
 
@@ -58,14 +58,14 @@ Ils donnent un effet professionnel et montrent la progression au client.
 ═══════════════════════════════════════════════════
 ```
 
-**Pour chaque tache — afficher les actions Playwright en temps reel:**
+**Pour chaque tache — afficher les actions du navigateur en temps reel:**
 ```
   🔄 [1/8] Login with valid credentials...
-     → Creating test email: POST /api/email-testing/aliases
-     → Got: test_login_042@testmail.aitestlist.com
+     → Creating test email: create_test_email
+     → Got: login_test_queue42@...
      → Navigate to /login
      → Snapshot: found email field, password field, Login button
-     → Fill email: test_login_042@testmail.aitestlist.com
+     → Fill email: login_test_queue42@...
      → Fill password: ********
      → Click "Login" button
      → Snapshot: URL=/dashboard, "Welcome" text found
@@ -137,222 +137,134 @@ Auto-fix:
   ⚠️  Errors:
      → [Profile] Update avatar — Timeout after 10s
 
-  📤 Results sent to AITestList
+  📤 Results sent to AI TestList
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-## Variables disponibles
+## Regle d'or : le guide du serveur fait foi
 
-Ce skill est prechage dans l'agent test-executor via le champ `skills:`.
-Les variables suivantes sont disponibles via preflight (egalement prechage):
-- `URL` — URL du serveur AITestList
-- `AITESTLIST_TOKEN` — Token API valide
-- `USER_LANG` — Langue de l'utilisateur (fr/en)
+**Avant d'executer, appeler `test_execution_guide`** et le suivre exactement : deroulement,
+statuts a reporter (`succes` / `echec` / `erreur`, regle « Suggestion »), marqueurs
+`[CREATE_TEST_EMAIL:...]` et `[PAYMENT_TEST]`, elevation de permissions en base, correction
+automatique, erreurs fatales. Ce skill ne garde que ce qui est propre a Claude Code :
+le navigateur, l'affichage, la delegation aux autres instructions.
 
-**IMPORTANT:** Tous les commentaires de resultats et le rapport final doivent etre rediges
-dans la langue `USER_LANG`.
+Les outils d'AI TestList s'appellent `mcp__plugin_aitest_aitestlist__<outil>`. N'appelle jamais
+l'API toi-meme (curl, Python) : elle refuse tout appel qui ne vient pas du serveur MCP.
+`USER_LANG` vient du preflight (`get_account`) : commentaires et rapport final dans cette langue.
 
 ## Etape 1: Verifications prealables
 
-### Etape 1A: Verifier MCP Playwright
+### Etape 1A: Navigateur
 
-Verifier que MCP Playwright est disponible en tentant un appel simple.
-Si MCP Playwright n'est pas disponible, informer l'utilisateur:
-"MCP Playwright n'est pas configure. Ajoutez-le avec: /mcp add playwright"
+Deux choix dans Claude Code :
+- **Playwright** (recommande) : outils `mcp__plugin_playwright_playwright__browser_*`.
+  Verifier avec un appel simple (`browser_tabs` ou `browser_snapshot`).
+- **Claude dans Chrome** : outils `mcp__claude-in-chrome__*`. Pilote le Chrome de l'utilisateur
+  (ses vraies sessions et ses temoins de connexion) : attention a ses comptes existants.
 
-### Etape 1B: Detecter le mode d'execution
+Aucun des deux → afficher ❌ « Aucun navigateur disponible. Installez le greffon Playwright :
+`/plugin install playwright@claude-plugins-official` » → **STOP**.
 
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" "${URL}/api/settings/exec-mode"
-```
+### Etape 1B: Mode d'execution
 
-Variable interne: `EXEC_MODE` = valeur retournee
-
-**Modes et comportement:**
+`get_exec_mode` → `exec_mode` et `payment_testing` (garder pour exec-payment).
 
 | Mode | Playwright | Comportement |
 |---|---|---|
-| `batch` | headless | Non-interactif (`claude -p`). Pas de browser visible. |
-| `interactive_headless` | headless | Session interactive, terminal visible, pas de browser. |
-| `interactive_browser_minimal` | headed, 1280x720 | Fenetre browser visible en taille compacte (defaut). |
-| `interactive_browser_fullscreen` | headed, maximize | Fenetre browser maximisee via CDP apres navigation. |
+| `batch` | headless | Non-interactif (`claude -p`). Pas de navigateur visible. |
+| `interactive_headless` | headless | Session interactive, terminal visible, pas de navigateur. |
+| `interactive_browser_minimal` | visible, 1280x720 | Fenetre compacte (defaut). `browser_resize(1280, 720)`. |
+| `interactive_browser_fullscreen` | visible, maximise | Fenetre maximisee via CDP apres la premiere navigation. |
 
-**Pour le mode fullscreen:** Apres la premiere navigation, maximiser la fenetre via CDP:
+**Mode plein ecran :** apres la premiere navigation, avec `browser_run_code` (ou `browser_run_code_unsafe`
+selon la version de Playwright) :
 ```javascript
 const cdp = await page.context().newCDPSession(page);
 const { windowId } = await cdp.send('Browser.getWindowForTarget');
 await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
 ```
 
-## Etape 2: Telecharger la file d'execution approuvee
+## Etape 2: Telecharger la file d'execution
 
-```bash
-curl -s -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-     "${URL}/api/execution-queue/${QUEUE_ID}/download"
-```
+`list_execution_queues` si l'utilisateur n'a pas donne de numero, puis `get_execution_queue(queue_id)`.
+Contenu et erreurs possibles : voir le guide. File vide (`tests` vide) → le dire a l'utilisateur.
 
-La reponse contient:
-- `project`: info du projet (id, name, path)
-- `global_rules`: rules globales du compte
-- `project_rules`: rules specifiques au projet
-- `tests`: liste des tests avec toutes leurs taches
+## Etape 3: Regles et correction automatique
 
-**Verifications:**
-- "Queue is not approved" → informer l'utilisateur
-- "Access denied" → verifier les permissions
-- `tests` vide → informer l'utilisateur
+Afficher `global_rules` et `project_rules` (voir l'affichage « Rules » plus haut) : ce sont des
+directives a respecter pendant toute l'execution. Lire `auto_fix_enabled`.
 
-## Etape 3: Lire les rules et le mode auto-fix
+## Etape 3b: Delegation aux instructions specialisees
 
-Verifier le flag `auto_fix_enabled` dans la reponse.
-Afficher les rules a l'ecran pour que l'agent les connaisse avant d'executer.
+Avant chaque tache (instructions prechargees dans l'agent via `skills:`) :
 
-**Ces rules sont des directives.** L'agent doit les respecter pendant l'execution.
+| Condition | Instructions |
+|-----------|-------------|
+| Description contient `[PAYMENT_TEST]` | exec-payment |
+| Description contient `[CREATE_TEST_EMAIL:...]` | exec-email |
+| Echec du a une restriction de forfait ou de role | exec-db-elevation |
 
-## Etape 3b - Delegation aux instructions specialisees
+## Etape 3c: Serveur cible joignable
 
-Avant d'executer chaque tache, verifier si elle necessite des instructions specialisees
-(prechargees dans l'agent via `skills:`):
-
-| Condition | Instructions | Action |
-|-----------|-------------|--------|
-| Description contient `[PAYMENT_TEST]` | exec-payment | Verifie toggle + execute avec cartes test |
-| Description contient `[CREATE_TEST_EMAIL:...]` | exec-email | Cree alias, attend email, extrait liens |
-| Tache echoue par restriction plan/role | exec-db-elevation | Eleve permissions BD, re-teste, restaure |
-
-## Etape 3c: Verifier la connectivite du serveur cible
-
-Avant d'executer les tests, verifier que le serveur cible (`target_url` du projet) est accessible.
-
-1. Naviguer vers `target_url` avec Playwright
-2. **Si la page repond** (meme avec une erreur HTTP comme 404):
+Naviguer vers `target_url`.
 ```
 🌐 Checking target server: http://localhost:8005
 ✅ Target server reachable
 ```
-3. **Si `ERR_CONNECTION_REFUSED` ou timeout:**
+Connexion refusee ou delai depasse :
 ```
 🌐 Checking target server: http://localhost:8005
 ❌ Target server unreachable: http://localhost:8005
    All tasks will be marked as error.
 ```
-→ Marquer toutes les taches en `erreur`, envoyer les resultats, afficher le rapport, **STOP**.
+→ toutes les taches en `erreur` en UN appel `report_results(queue_id, results)` (ferme la file ;
+ne PAS appeler `finalize_execution`), rapport final, **STOP**.
 
-## Etape 4: Executer les tests via MCP Playwright
+## Etape 4: Executer les tests
 
-Pour chaque test:
-1. Afficher le nom du test
-2. Pour chaque tache du test (ordonnee par position):
-   a. Lire le titre et la description de la tache
-   b. La description contient: Preconditions, Steps (etapes), Expected (resultat attendu)
-   c. Verifier si delegation necessaire (voir tableau etape 3)
-   d. Interpreter les etapes et les executer via MCP Playwright
-   e. Verifier le resultat attendu
-   f. Capturer: passed/failed/error avec message si echec
-   g. **Reporter le resultat live** (instructions report-live dans le contexte de l'agent)
-   h. **Si auto_fix_enabled ET la tache a echoue:**
-      1. Analyser le code source du projet pour trouver la cause
-      2. Appliquer le fix dans le code
-      3. Re-tester la meme tache
-      4. Si passe: mettre a jour le resultat, ajouter "Fixed: [description]"
-      5. Si echoue encore: garder echec, ajouter "Fix attempted but failed"
-   i. **Verification post-action (si auto_fix_enabled):**
-      Apres toute tache qui modifie l'etat du systeme (INSERT BD, creation de compte,
-      modification de code, auto-fix), verifier que les pages affectees ne crashent pas.
-      Voir section "Verification post-action" ci-dessous.
-3. Passer au test suivant
+Pour chaque test, puis chaque tache par `position` : suivre « Executing a task » du guide,
+puis **`report_result` immediatement** (instructions report-live).
 
-### Verification post-action (max 3 tentatives)
+### Outils Playwright
 
-**Quand:** Apres toute tache qui modifie l'etat du systeme, SI `auto_fix_enabled` est `true`.
-
-**Taches concernees:**
-- Taches `[SETUP]` (creation de comptes, projets, donnees de test via BD)
-- Taches ou un auto-fix a ete applique (modification de code ou de BD)
-- Taches qui inserent/modifient des donnees directement en BD
-
-**Procedure:**
-1. Identifier les pages affectees par l'action (ex: si INSERT dans `projects` → `/projects`)
-2. Naviguer vers chaque page affectee avec Playwright
-3. Prendre un snapshot et verifier qu'il n'y a pas d'erreur (500, UndefinedError, crash)
-4. **Si la page crashe:**
-   - Analyser l'erreur (ex: champ NULL, attribut manquant)
-   - Corriger la donnee ou le code source
-   - Re-verifier la page
-   - **Maximum 3 tentatives** par page. Apres 3 echecs, logger un warning et continuer.
-
-**Affichage:**
-```
-  🔍 Post-action check: /projects
-     → Snapshot: page OK
-```
-
-En cas de correction:
-```
-  🔍 Post-action check: /projects
-     → ❌ Page error: UndefinedError 'None' has no attribute 'strftime'
-     → Fix attempt 1/3: UPDATE projects SET date_creation=CURDATE() WHERE id=15
-     → Re-check: /projects
-     → ✅ Page OK after fix
-```
-
-En cas d'echec apres 3 tentatives:
-```
-  🔍 Post-action check: /projects
-     → ❌ Page error after 3 attempts — continuing execution
-```
-
-**IMPORTANT:** Cette verification ne change PAS le statut de la tache en cours.
-Elle sert uniquement a detecter et corriger les effets de bord avant de continuer.
-
-### Outils MCP Playwright
-
-| Action | Outil MCP |
+| Action | Outil |
 |---|---|
-| Naviguer | browser_navigate(url) |
-| Cliquer | browser_click(ref, element) |
-| Remplir un champ | browser_type(ref, text) ou browser_fill_form(fields) |
-| Selectionner option | browser_select_option(ref, values) |
-| Verifier texte | browser_snapshot() puis chercher le texte |
-| Verifier URL | browser_snapshot() et lire l'URL de la page |
-| Verifier visible | browser_snapshot() et chercher l'element |
-| Screenshot | browser_take_screenshot() |
-| Attendre | browser_wait_for(text) ou browser_wait_for(time) |
-| Evaluer JS | browser_evaluate(function) |
+| Naviguer | `browser_navigate(url)` |
+| Etat de la page + refs | `browser_snapshot()` |
+| Cliquer | `browser_click(ref, element)` |
+| Remplir un champ | `browser_type(ref, text)` ou `browser_fill_form(fields)` |
+| Choisir une option | `browser_select_option(ref, values)` |
+| Touche clavier | `browser_press_key(key)` |
+| Boite de dialogue du navigateur | `browser_handle_dialog(accept)` |
+| Attendre | `browser_wait_for(text)` ou `browser_wait_for(time)` |
+| Evaluer du JS | `browser_evaluate(function)` |
+| Capture d'ecran | `browser_take_screenshot()` |
+| Onglets / fenetres | `browser_tabs` |
+| Console, requetes reseau | `browser_console_messages`, `browser_network_requests` |
 
-**IMPORTANT:** Utiliser browser_snapshot() pour obtenir l'etat de la page et les refs des elements.
-Les refs changent apres chaque action — toujours reprendre un snapshot avant d'interagir.
+**IMPORTANT :** les refs changent apres chaque action — reprendre un `browser_snapshot()` avant d'interagir.
 
-## Etape 5: Reporter les resultats a AITestList
+### Equivalents Claude dans Chrome
 
-Les resultats sont deja envoyes live (etape 4g).
+`navigate`, `read_page` / `get_page_text` (etat de la page), `find` (reperer un element),
+`computer` (clic, saisie, capture), `form_input`, `javascript_tool`, `read_console_messages`,
+`read_network_requests`, `tabs_context_mcp` / `tabs_create_mcp`.
 
-Apres tous les tests, envoyer le batch final pour s'assurer que tout est enregistre:
+### Correction automatique et verification apres action
 
-```bash
-curl -s -X POST -H "Authorization: Bearer $AITESTLIST_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "results": [
-         {"task_id": 123, "status": "succes", "comment": null},
-         {"task_id": 124, "status": "echec", "comment": "Expected error message, got success page"}
-       ]
-     }' \
-     "${URL}/api/execution-queue/${QUEUE_ID}/results"
-```
+Seulement si `auto_fix_enabled` est vrai (regles dans le guide). Dans Claude Code : lire et corriger
+le code du projet avec Read, Grep, Edit ; reporter l'echec AVANT de corriger, re-tester, puis
+reporter le nouveau resultat (« Fixed: ... » ou « Fix attempted but failed »).
 
-**Statuts valides:**
+Apres une tache qui modifie l'etat (`[SETUP]`, correction, insertion en base) : ouvrir les pages
+touchees, `browser_snapshot`, verifier l'absence d'erreur (500, UndefinedError). Au plus 3
+tentatives de correction par page, puis continuer. Cette verification ne change PAS le statut de la tache.
 
-| Statut | Quand l'utiliser |
-|---|---|
-| `succes` | La fonctionnalite testee marche comme prevu |
-| `succes` + Suggestion | La fonctionnalite marche mais amelioration nice-to-have absente |
-| `echec` | La fonctionnalite existe mais ne marche pas correctement |
-| `erreur` | Crash, erreur 500, exception Playwright, page inaccessible |
+## Etape 5: Finaliser
 
-**Regle "Suggestion":** Si une tache decrit une fonctionnalite "nice-to-have"
-qui n'existe pas encore, marquer comme `succes` avec commentaire "Suggestion : ...".
-Reserver `echec` aux fonctionnalites qui EXISTENT mais sont CASSEES.
+Quand toutes les taches sont reportees : `finalize_execution(queue_id)`.
+Ne jamais appeler `report_results` apres des resultats envoyes en direct.
 
 ## Etape 6: Rapport final (dans USER_LANG)
 
@@ -361,51 +273,26 @@ Reserver `echec` aux fonctionnalites qui EXISTENT mais sont CASSEES.
 Tests: 5
 Taches: 45 total, 40 succes, 3 echecs, 1 erreur, 1 suggestion
 Taux de reussite: 89%
-Resultats envoyes a AITestList.
+Resultats envoyes a AI TestList.
 ```
 
-**IMPORTANT:** Le rapport ci-dessus est la DERNIERE chose affichee. Ne JAMAIS ajouter
-de texte supplementaire apres le rapport (pas de liste de ✅, pas de resume additionnel).
-Le rapport EST le resume final.
+**IMPORTANT:** Le rapport est la DERNIERE chose affichee. Rien apres.
 
 ## Gestion d'erreurs
 
 ### Erreurs fatales — ARRET IMMEDIAT
 
-Ces erreurs arretent TOUTE l'execution. Ne JAMAIS continuer apres une erreur fatale.
-Ne JAMAIS tenter de contourner le probleme (ex: chercher un autre token, deviner une URL).
+Ne JAMAIS contourner (pas d'appel direct a l'API, pas d'URL devinee).
 
-- **MCP Playwright pas configure** → Afficher ❌ + "Ajoutez-le avec: /mcp add playwright" → **STOP**
-- **Token invalide/revoque** → Afficher ❌ + "Token invalide. Generez-en un dans Settings > Integration." → **STOP**
-- **API AITestList down** → Afficher ❌ + "Serveur AITestList injoignable" → **STOP**
-- **File pas trouvee** → Afficher ❌ + "File #ID non trouvee." → **STOP**
-- **File pas approuvee** → Afficher ❌ + "Approuvez-la dans AITestList." → **STOP**
-- **Serveur cible injoignable** (voir ci-dessous) → **STOP**
+- **Aucun navigateur** → ❌ + consigne d'installation de l'etape 1A → **STOP**
+- **Connexion a AI TestList refusee ou expiree** (« Not connected », 401, acces refuse) →
+  ❌ « Tapez `/mcp`, choisissez `aitestlist`, puis Authenticate » → **STOP**
+- **Forfait sans execution** (`exec_test_enabled` faux) → ❌ → **STOP**
+- **File introuvable** → ❌ « File #ID introuvable. » → **STOP**
+- **File pas approuvee** → ❌ « Approuvez-la dans AI TestList. » → **STOP**
+- **Serveur cible injoignable** → etape 3c → **STOP**
 
-### Serveur cible injoignable — Detection et arret
+### Erreurs de tache — continuer
 
-Apres le telechargement de la queue (etape 2), AVANT d'executer les tests:
-1. Tenter une navigation vers `target_url` avec Playwright
-2. Si `ERR_CONNECTION_REFUSED` ou timeout:
-   a. Afficher: `❌ Target server unreachable: {target_url}`
-   b. Marquer TOUTES les taches comme `erreur` avec commentaire "Target server unreachable: {target_url}"
-   c. Envoyer les resultats a AITestList (toutes les taches en erreur)
-   d. Afficher le rapport final
-   e. **STOP** — ne pas essayer chaque tache individuellement
-
-### Erreurs de tache — Continuer l'execution
-
-Ces erreurs concernent une tache individuelle. On marque la tache en erreur et on continue.
-
-- Element non trouve dans le snapshot → `erreur` + description
-- Timeout sur une action specifique (click, fill) → `erreur` + description
-- Erreur JavaScript dans la page → `erreur` + description
-
-## Regle auto-fix
-
-- Ne JAMAIS modifier le code source sauf si `auto_fix_enabled` est `true`
-- Toujours reporter le probleme AVANT de tenter un fix
-- Toujours re-tester apres un fix
-- Documenter le fix dans le commentaire de la tache
-- Apres toute modification (BD ou code), effectuer la verification post-action (max 3 tentatives)
-- Les verifications post-action ne changent pas le statut de la tache
+Element introuvable, delai depasse sur une action, erreur JavaScript dans la page →
+`erreur` + description, puis tache suivante.
