@@ -1,7 +1,7 @@
 {
   "name": "aitest",
   "version": "2.0.0",
-  "description": "AI TestList : créer, exécuter et rapporter des tests avec votre assistant IA. Connexion par votre compte AI TestList (serveur MCP, aucune clé à copier).",
+  "description": "Remplacé par le serveur AI TestList : ajoutez https://aitestlist.com/mcp à votre assistant IA (Paramètres > Intégration). / Replaced by the AI TestList server: add https://aitestlist.com/mcp to your AI assistant (Settings > Integration).",
   "author": {
     "name": "Solutions Codexalia Inc.",
     "email": "support@aitestlist.com"
@@ -9,5 +9,12 @@
   "homepage": "https://aitestlist.com",
   "repository": "https://github.com/carthack/aitestlist-plugin",
   "license": "MIT",
-  "keywords": ["qa", "testing", "playwright", "stripe", "aitestlist", "mcp"]
+  "keywords": [
+    "qa",
+    "testing",
+    "playwright",
+    "stripe",
+    "aitestlist",
+    "mcp"
+  ]
 }

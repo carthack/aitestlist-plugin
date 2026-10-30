@@ -5,7 +5,7 @@
     "url": "https://aitestlist.com"
   },
   "metadata": {
-    "description": "AI TestList : créer, exécuter et rapporter des tests avec votre assistant IA.",
+    "description": "Remplacé par le serveur AI TestList : ajoutez https://aitestlist.com/mcp à votre assistant IA (Paramètres > Intégration). / Replaced by the AI TestList server: add https://aitestlist.com/mcp to your AI assistant (Settings > Integration).",
     "version": "2.0.0",
     "repository": "https://github.com/carthack/aitestlist-plugin"
   },
@@ -13,7 +13,7 @@
     {
       "name": "aitest",
       "version": "2.0.0",
-      "description": "AI TestList : créer, exécuter et rapporter des tests avec votre assistant IA.",
+      "description": "Remplacé par le serveur AI TestList : ajoutez https://aitestlist.com/mcp à votre assistant IA (Paramètres > Intégration). / Replaced by the AI TestList server: add https://aitestlist.com/mcp to your AI assistant (Settings > Integration).",
       "source": {
         "source": "github",
         "repo": "carthack/aitestlist-plugin"
